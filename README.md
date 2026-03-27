@@ -208,6 +208,44 @@ Compativel com qualquer plataforma de hospedagem estatica:
 | **clsx + tailwind-merge** | &mdash; | Composicao de classes CSS condicionais |
 | **Service Worker** | &mdash; | Cache inteligente e suporte offline |
 | **PWA** | &mdash; | Instalacao como app nativo em mobile |
+| **Cypress** | 15.x | Testes E2E automatizados |
+
+---
+
+## Testes E2E (Cypress)
+
+Suite completa com **80 testes** distribuidos em **18 suites**, cobrindo seguranca, usabilidade e integridade:
+
+| Suite | Qtd | O que valida |
+|-------|-----|-------------|
+| Autenticacao | 10 | Login, logout, credenciais invalidas, trim, case-sensitive, sessao |
+| Protecao de Rotas | 2 | Bloqueio de conteudo admin sem login |
+| Dashboard | 6 | Tabela, consultoras, mes, ano, perfil, estatisticas |
+| Navegacao | 2 | Avancar/voltar meses via sidebar |
+| Gestao de Consultoras | 6 | Adicionar, duplicata case-insensitive, remover com confirmacao, persistencia |
+| Busca | 2 | Filtro por nome com destaque, limpeza de filtro |
+| Edicao de Escala | 5 | Override manual, modal, overlay, audit log, persistencia |
+| Gestao de Feriados | 5 | CRUD, duplicatas, modal open/close |
+| Gestao de Ferias | 5 | CRUD, validacao data fim < inicio, persistencia localStorage |
+| Historico de Trocas | 4 | Registro apos edicao, visualizacao, limpeza |
+| Persistencia | 3 | Chaves localStorage, dados apos reload, limite 200 no audit log |
+| View de Consulta | 4 | Acesso publico sem login, sem botoes admin, navegacao |
+| Seguranca XSS | 5 | Injecao HTML, event handlers, img onerror, SQL injection no login |
+| Backup/Restauracao | 3 | Botoes visiveis, validacao de versao do JSON |
+| Botoes da Sidebar | 4 | Emitir Escala, Link Consultoras, clipboard, Sair |
+| Integridade | 5 | 31 dias, sabados, feriados em janeiro, equidade, domingos = folga |
+| Responsividade | 4 | Sidebar oculta, hamburger, tabela oculta, mini-stats mobile |
+| Seguranca de Sessao | 3 | sessionStorage vs localStorage, credenciais nao expostas |
+
+### Executar testes
+
+```bash
+# UI interativa (recomendado para desenvolvimento)
+npx cypress open
+
+# Headless (CI/CD)
+npx cypress run
+```
 
 ---
 
@@ -238,6 +276,15 @@ gestao_de_escala/
 |-- postcss.config.js         # Configuracao PostCSS
 |-- package.json              # Dependencias e scripts
 +-- README.md                 # Este arquivo
+|
+|-- cypress/
+|   |-- e2e/
+|   |   +-- login.cy.js       # Suite completa E2E (18 suites, 80 testes)
+|   |-- support/
+|   |   |-- commands.js        # Comandos customizados Cypress
+|   |   +-- e2e.js             # Setup de suporte E2E
+|   +-- fixtures/              # Dados de teste
++-- cypress.config.js          # Configuracao Cypress
 ```
 
 ### Arquivos-chave
@@ -262,7 +309,7 @@ gestao_de_escala/
 
 ## Roadmap
 
-- [ ] Testes E2E com Cypress
+- [x] Testes E2E com Cypress (18 suites, 80 testes)
 - [ ] Exportar escala como PDF
 - [ ] Notificacao via WhatsApp Web
 - [ ] Tema claro/escuro na consulta
