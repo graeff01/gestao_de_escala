@@ -268,15 +268,6 @@ function MobileCard({ row, onEdit, consultants: allConsultants }) {
         </div>
       </div>
 
-      {/* Subtle coverage indicator on mobile */}
-      {vacCons.length > 0 && !isSun && !isHoliday && (
-        <div className="flex items-center gap-1 pl-1">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 text-[9px] font-bold">
-            <Palmtree className="w-2.5 h-2.5" />
-            cobertura ativa
-          </span>
-        </div>
-      )}
     </motion.div>
   );
 }
@@ -1206,15 +1197,6 @@ export default function App() {
                               )}
                             </div>
 
-                            {/* Vacation indicator — subtle dot on rows where rotation was affected */}
-                            {row.hasVacation && !isHolidayOrSun && (
-                              <div className="flex items-center gap-1 flex-wrap justify-center">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 text-[9px] font-bold border border-amber-200">
-                                  <Palmtree className="w-2.5 h-2.5" />
-                                  cobertura ativa
-                                </span>
-                              </div>
-                            )}
                           </div>
                         </td>
                       </motion.tr>
