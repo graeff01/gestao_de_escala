@@ -550,15 +550,25 @@ export default function App() {
 
   const maxDays = Math.max(...stats.map(s => s.total), 1);
 
+  // ── Navigation limits: ±12 months from today ───────────
+  const todayMonth = useMemo(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  }, []);
+
+  const minMonth = subMonths(todayMonth, 12);
+  const maxMonth = addMonths(todayMonth, 12);
+  const canGoPrev = currentMonth.getTime() > minMonth.getTime();
+  const canGoNext = currentMonth.getTime() < maxMonth.getTime();
+
   // Alerta: mês exibido não tem nenhum feriado e é diferente do mês atual
   // (não alertamos no mês corrente pois os feriados podem ter passado)
   const noHolidayWarning = useMemo(() => {
-  const monthStr = format(currentMonth, "yyyy-MM");
-  const hasAny = holidays.some(h => h.date.startsWith(monthStr));
-  const isFuture = currentMonth.getTime() > todayMonth.getTime();
-
-  return isFuture && !hasAny;
-}, [currentMonth, holidays, todayMonth]);
+    const monthStr = format(currentMonth, 'yyyy-MM');
+    const hasAny = holidays.some(h => h.date.startsWith(monthStr));
+    const isFuture = currentMonth.getTime() > todayMonth.getTime();
+    return isFuture && !hasAny;
+  }, [currentMonth, holidays, todayMonth]);
 
   // Próximos plantões: para cada consultora, os próximos 3 dias a partir de hoje
   const nextShifts = useMemo(() => {
@@ -603,18 +613,6 @@ export default function App() {
   }
 
   // ── Handlers ───────────────────────────────────────────
-  // Navigation limits: ±12 months from today
-  // Navigation limits: ±12 months from today
-const todayMonth = useMemo(() => {
-  const n = new Date();
-  return new Date(n.getFullYear(), n.getMonth(), 1);
-}, []);
-
-const minMonth = subMonths(todayMonth, 12);
-const maxMonth = addMonths(todayMonth, 12);
-const canGoPrev = currentMonth.getTime() > minMonth.getTime();
-const canGoNext = currentMonth.getTime() < maxMonth.getTime();
-
   const prevMonth = () => { if (canGoPrev) setCurrentMonth(subMonths(currentMonth, 1)); };
   const nextMonth = () => { if (canGoNext) setCurrentMonth(addMonths(currentMonth, 1)); };
 
