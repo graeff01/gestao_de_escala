@@ -28,3 +28,9 @@ dist-ssr
 
 # Screenshots locais
 shot_*.png
+
+# Vite environment files (Firebase credentials etc.)
+.env
+.env.local
+.env.*.local
+!.env.example

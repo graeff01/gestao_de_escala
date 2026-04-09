@@ -100,54 +100,59 @@ Antes, o controle era feito manualmente via planilhas e mensagens de WhatsApp. A
 ## Arquitetura
 
 ```
-+---------------------------------------------------+
-|                    NAVEGADOR                       |
-|                                                    |
-|  +----------------+       +---------------------+ |
-|  |  App.jsx       |       |  ConsultaView.jsx   | |
-|  |  (Admin)       |       |  (Somente Leitura)  | |
-|  |                |       |                     | |
-|  |  - Login       |       |  - Escala           | |
-|  |  - Escala      | ====> |  - Navegacao        | |
-|  |  - Trocas      | localStorage               | |
-|  |  - Feriados    |       |  Listeners:         | |
-|  |  - Ferias      |       |  - storage event    | |
-|  |  - Historico   |       |  - visibilitychange | |
-|  |  - Backup      |       |  - focus            | |
-|  +-------+--------+       +---------------------+ |
-|          |                                         |
-|  +-------v--------+       +---------------------+ |
-|  | scheduler.js   |       |   Service Worker    | |
-|  |                |       |   (sw.js)           | |
-|  | - Rotacao      |       |                     | |
-|  | - Ferias       |       | - Cache assets      | |
-|  | - Feriados     |       | - Offline support   | |
-|  | - Timezone fix |       | - Network-first     | |
-|  +----------------+       +---------------------+ |
-|                                                    |
-|  +----------------------------------------------+ |
-|  |            localStorage (keys)                | |
-|  |                                               | |
-|  |  jl_consultants_v6  -> ["Roberta", ...]      | |
-|  |  jl_holidays_v6     -> [{ date, name }]      | |
-|  |  jl_overrides_v6    -> { "2026-03-15": ... } | |
-|  |  jl_vacations_v6    -> [{ consultant, ... }] | |
-|  |  jl_audit_log_v6    -> [{ from, to, ... }]   | |
-|  |  jl_auth_session    -> sessionStorage         | |
-|  +----------------------------------------------+ |
-+---------------------------------------------------+
++-----------------------------------------------------------+
+|                       NAVEGADOR                            |
+|                                                            |
+|  +----------------+              +---------------------+   |
+|  |   App.jsx      |              |  ConsultaView.jsx   |   |
+|  |   (Admin)      |              |  (Somente Leitura)  |   |
+|  |                |              |                     |   |
+|  |  - Firebase    |              |  - onSnapshot       |   |
+|  |    Auth        |              |    (real-time)      |   |
+|  |  - useCloudData|              |  - useCloudData     |   |
+|  |  - Trocas      |              |    (read-only)      |   |
+|  |  - Feriados    |              |                     |   |
+|  |  - Ferias      |              |                     |   |
+|  +-------+--------+              +---------+-----------+   |
+|          |                                 |               |
+|          v                                 v               |
+|  +----------------------------------------------------+   |
+|  |               useCloudData (hook)                  |   |
+|  |  - onSnapshot subscription                          |   |
+|  |  - setDoc(merge) writes                             |   |
+|  |  - IndexedDB offline cache                          |   |
+|  +-----------------------+----------------------------+   |
+|                          |                                 |
++--------------------------|---------------------------------+
+                           |
+                           v
+              +---------------------------+
+              |    Firebase Firestore     |
+              |                           |
+              |  /escalas/main            |
+              |  {                        |
+              |    consultants: [...],    |
+              |    holidays: [...],       |
+              |    overrides: { ... },    |
+              |    vacations: [...],      |
+              |    auditLog: [...],       |
+              |    updatedAt: timestamp   |
+              |  }                        |
+              +---------------------------+
 ```
 
 ### Decisoes de arquitetura
 
 | Decisao | Motivo |
 |---------|--------|
-| **100% client-side** | Zero custo de infraestrutura, sem backend ou banco de dados |
-| **localStorage** | Persistencia simples, dados ficam no dispositivo da gestora |
+| **Firestore (1 documento)** | Sincronizacao real-time multi-dispositivo, custo zero no plano Spark |
+| **Firebase Auth (Email/Password)** | Login seguro, sessao persistente, sem reinventar autenticacao |
+| **onSnapshot listeners** | Mudancas no admin aparecem instantaneamente em todos os celulares conectados |
+| **IndexedDB cache offline** | Firestore SDK guarda copia local automatica, app funciona sem internet |
+| **Documento unico** | Dataset pequeno (< 1MB), 1 leitura = estado completo, escritas atomicas |
 | **Service Worker** | Permite uso offline e instalacao como PWA |
 | **Rotacao continua** | Indices acumulam mes a mes para manter equidade a longo prazo |
 | **`T12:00:00` em datas** | Evita shift de timezone UTC para local (bug classico no Brasil UTC-3) |
-| **Eventos storage/visibility** | Sincroniza admin para consulta em tempo real no PWA |
 
 ---
 
@@ -157,22 +162,29 @@ Antes, o controle era feito manualmente via planilhas e mensagens de WhatsApp. A
 
 - [Node.js](https://nodejs.org/) 18+
 - npm ou yarn
+- Conta no [Firebase Console](https://console.firebase.google.com) (gratuita)
 
 ### Instalacao
 
 ```bash
 # Clone o repositorio
 git clone https://github.com/graeff01/gestao_de_escala.git
-
-# Entre na pasta
 cd gestao_de_escala
 
 # Instale as dependencias
 npm install
 
+# Configure o Firebase (siga o FIREBASE_SETUP.md)
+cp .env.example .env
+# Edite .env e cole as credenciais do seu projeto Firebase
+
 # Rode em modo desenvolvimento
 npm run dev
 ```
+
+> **Primeira vez?** Veja o [FIREBASE_SETUP.md](FIREBASE_SETUP.md) com o
+> passo-a-passo completo: criar projeto Firebase, habilitar Firestore e Auth,
+> definir regras de seguranca e configurar variaveis de ambiente.
 
 O app abrira em `http://localhost:5173`
 
@@ -202,6 +214,8 @@ Compativel com qualquer plataforma de hospedagem estatica:
 | **React** | 19.2 | Biblioteca de UI com hooks e componentes funcionais |
 | **Vite** | 7.3 | Bundler ultrarrapido com HMR |
 | **Tailwind CSS** | 3.4 | Estilizacao utility-first responsiva |
+| **Firebase Firestore** | 10.x | Banco de dados em tempo real (sync multi-dispositivo) |
+| **Firebase Auth** | 10.x | Autenticacao Email/Password com sessao persistente |
 | **Framer Motion** | 12.x | Animacoes fluidas e microinteracoes |
 | **date-fns** | 4.1 | Manipulacao de datas com suporte a pt-BR |
 | **Lucide React** | 0.575 | Biblioteca de icones SVG |

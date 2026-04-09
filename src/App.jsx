@@ -5,31 +5,27 @@ import {
   Users, Plus, Trash2, ChevronLeft, ChevronRight,
   Edit3, X, Check, BarChart3, CalendarCheck2,
   ShieldCheck, Search, CalendarClock, History,
-  Info, Menu, Link2, Eye, Lock, LogOut,
+  Info, Menu, Eye, Lock, LogOut,
   ClipboardList, Palmtree, ArrowRight, CalendarOff,
-  Download, Upload
+  Download, Upload, Loader2, CloudOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+} from 'firebase/auth';
 import { generateSchedule, capitalize } from './utils/scheduler';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { auth, ADMIN_EMAIL } from './firebase';
+import { useCloudData } from './hooks/useCloudData';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
-
-const useStorage = (key, initialValue) => {
-  const [value, setValue] = useState(() => {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : initialValue;
-  });
-  useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(value));
-  }, [key, value]);
-  return [value, setValue];
-};
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 
@@ -225,24 +221,46 @@ function MobileCard({ row, colorIndex, onEdit, consultants: allConsultants }) {
 
 // ─── Login Screen ────────────────────────────────────────────────────────────
 
+// The admin's username (case-insensitive). The actual auth happens via Firebase
+// Email/Password using the synthetic ADMIN_EMAIL — we keep the "name" field
+// in the UI as a tiny extra hurdle and to preserve the existing UX.
 const AUTH_USER = 'Ana';
-const AUTH_PASS = 'Liberdade131*';
 
-function LoginScreen({ onLogin }) {
+function LoginScreen() {
   const [name, setName]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]     = useState('');
   const [shake, setShake]     = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (name.trim() === AUTH_USER && password === AUTH_PASS) {
-      sessionStorage.setItem('jl_auth_session', 'true');
-      onLogin();
-    } else {
+    if (loading) return;
+
+    if (name.trim().toLowerCase() !== AUTH_USER.toLowerCase()) {
       setError('Nome ou senha incorretos');
       setShake(true);
       setTimeout(() => setShake(false), 500);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, ADMIN_EMAIL, password);
+      // Auth state listener in App will pick this up and re-render.
+    } catch (err) {
+      // Firebase returns specific error codes; we collapse them all to a
+      // single user-facing message to avoid leaking which field was wrong.
+      const offlineCodes = ['auth/network-request-failed'];
+      if (offlineCodes.includes(err?.code)) {
+        setError('Sem conexão com o servidor. Verifique sua internet.');
+      } else {
+        setError('Nome ou senha incorretos');
+      }
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -308,10 +326,11 @@ function LoginScreen({ onLogin }) {
 
           <button
             type="submit"
-            className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-emerald-950/50 transition-all active:scale-[0.97] flex items-center justify-center gap-2.5"
+            disabled={loading}
+            className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-emerald-950/50 transition-all active:scale-[0.97] flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Lock className="w-4 h-4" />
-            Entrar
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+            {loading ? 'Entrando…' : 'Entrar'}
           </button>
         </motion.form>
 
@@ -325,30 +344,53 @@ function LoginScreen({ onLogin }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-export default function App() {
-  // ── Auth ──────────────────────────────────────────────
-  const [isLoggedIn, setIsLoggedIn] = useState(() => sessionStorage.getItem('jl_auth_session') === 'true');
+const DEFAULT_HOLIDAYS_2026 = [
+  { date: '2026-01-01', name: 'Ano Novo'              },
+  { date: '2026-02-16', name: 'Carnaval'              },
+  { date: '2026-02-17', name: 'Carnaval'              },
+  { date: '2026-02-18', name: 'Cinzas'                },
+  { date: '2026-04-03', name: 'Sexta-Feira Santa'     },
+  { date: '2026-04-21', name: 'Tiradentes'            },
+  { date: '2026-05-01', name: 'Dia do Trabalho'       },
+  { date: '2026-06-04', name: 'Corpus Christi'        },
+  { date: '2026-09-07', name: 'Independência'         },
+  { date: '2026-10-12', name: 'N. Sra. Aparecida'     },
+  { date: '2026-11-02', name: 'Finados'               },
+  { date: '2026-11-15', name: 'Proclamação República' },
+  { date: '2026-11-20', name: 'Consciência Negra'     },
+  { date: '2026-12-25', name: 'Natal'                 },
+];
 
-  // ── State (all hooks must be before any conditional return) ──
+export default function App() {
+  // ── Auth (Firebase) ──────────────────────────────────────
+  const [authState, setAuthState] = useState('loading'); // 'loading' | 'in' | 'out'
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setAuthState(user ? 'in' : 'out');
+    });
+    return unsub;
+  }, []);
+
+  // ── Cloud data (Firestore real-time) ─────────────────────
+  // We pass readOnly when not logged in so listeners are still attached
+  // (snapshot subscriptions don't need auth for our public document) but
+  // we silently ignore any write that slips through.
+  const cloud = useCloudData({ readOnly: authState !== 'in' });
+  const { data: cloudData, status: cloudStatus, replaceAll } = cloud;
+  const consultants = cloudData.consultants;
+  const holidays    = cloudData.holidays;
+  const overrides   = cloudData.overrides;
+  const vacations   = cloudData.vacations;
+  const auditLog    = cloudData.auditLog;
+  const setConsultants = cloud.setConsultants;
+  const setHolidays    = cloud.setHolidays;
+  const setOverrides   = cloud.setOverrides;
+  const setVacations   = cloud.setVacations;
+  const setAuditLog    = cloud.setAuditLog;
+
+  // ── Local UI state (not persisted) ──────────────────────
   const [currentMonth, setCurrentMonth] = useState(new Date(2026, 2, 1));
-  const [consultants, setConsultants]   = useStorage('jl_consultants_v6', ['Roberta', 'Elis', 'Duda']);
-  const [holidays, setHolidays]         = useStorage('jl_holidays_v6', [
-    { date: '2026-01-01', name: 'Ano Novo'              },
-    { date: '2026-02-16', name: 'Carnaval'              },
-    { date: '2026-02-17', name: 'Carnaval'              },
-    { date: '2026-02-18', name: 'Cinzas'                },
-    { date: '2026-04-03', name: 'Sexta-Feira Santa'     },
-    { date: '2026-04-21', name: 'Tiradentes'            },
-    { date: '2026-05-01', name: 'Dia do Trabalho'       },
-    { date: '2026-06-04', name: 'Corpus Christi'        },
-    { date: '2026-09-07', name: 'Independência'         },
-    { date: '2026-10-12', name: 'N. Sra. Aparecida'     },
-    { date: '2026-11-02', name: 'Finados'               },
-    { date: '2026-11-15', name: 'Proclamação República' },
-    { date: '2026-11-20', name: 'Consciência Negra'     },
-    { date: '2026-12-25', name: 'Natal'                 },
-  ]);
-  const [overrides, setOverrides]           = useStorage('jl_overrides_v6', {});
   const [searchTerm, setSearchTerm]         = useState('');
   const [editingDay, setEditingDay]         = useState(null);
   const [showHolidayManager, setHolidayMgr] = useState(false);
@@ -356,8 +398,6 @@ export default function App() {
   const [holidayName, setHolidayName]       = useState('');
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [linkCopied, setLinkCopied]         = useState(false);
-  const [auditLog, setAuditLog]             = useStorage('jl_audit_log_v6', []);
-  const [vacations, setVacations]           = useStorage('jl_vacations_v6', []);
   const [showAuditLog, setShowAuditLog]     = useState(false);
   const [showVacationMgr, setShowVacationMgr] = useState(false);
   const [vacConsultant, setVacConsultant]   = useState('');
@@ -365,6 +405,21 @@ export default function App() {
   const [vacEndDate, setVacEndDate]         = useState('');
   const [vacType, setVacType]               = useState('ferias');
   const [vacDescription, setVacDescription] = useState('');
+
+  // First-time setup: if Firestore document is empty AND we just logged in,
+  // seed it with the default holidays and consultants so the gestora has
+  // something to work with instead of an empty screen.
+  useEffect(() => {
+    if (authState === 'in' && cloudStatus === 'empty') {
+      replaceAll({
+        consultants: ['Roberta', 'Elis', 'Duda'],
+        holidays:    DEFAULT_HOLIDAYS_2026,
+        overrides:   {},
+        vacations:   [],
+        auditLog:    [],
+      }).catch(() => {});
+    }
+  }, [authState, cloudStatus, replaceAll]);
 
   const copyConsultaLink = () => {
     const url = window.location.origin + window.location.pathname + '?modo=consulta';
@@ -422,13 +477,25 @@ export default function App() {
   const maxDays = Math.max(...stats.map(s => s.total), 1);
 
   // ── Auth guard (after all hooks) ─────────────────────
-  const handleLogout = () => {
-    sessionStorage.removeItem('jl_auth_session');
-    setIsLoggedIn(false);
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('signOut failed', e);
+    }
   };
 
-  if (!isLoggedIn) {
-    return <LoginScreen onLogin={() => setIsLoggedIn(true)} />;
+  if (authState === 'loading') {
+    return (
+      <div className="min-h-screen bg-[#1C1F26] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+      </div>
+    );
+  }
+
+  if (authState === 'out') {
+    return <LoginScreen />;
   }
 
   // ── Handlers ───────────────────────────────────────────
@@ -437,18 +504,19 @@ export default function App() {
 
   const addHoliday = (e) => {
     e.preventDefault();
-    if (holidayDate && holidayName) {
+    const trimmedName = holidayName.trim();
+    if (holidayDate && trimmedName) {
       if (holidays.some(h => h.date === holidayDate)) {
         alert('Já existe um feriado cadastrado nesta data.');
         return;
       }
-      setHolidays([...holidays, { date: holidayDate, name: holidayName }]);
+      setHolidays(prev => [...prev, { date: holidayDate, name: trimmedName }]);
       setHolidayDate('');
       setHolidayName('');
     }
   };
 
-  const removeHoliday = (date) => setHolidays(holidays.filter(h => h.date !== date));
+  const removeHoliday = (date) => setHolidays(prev => prev.filter(h => h.date !== date));
 
   const applyOverride = (date, name) => {
     // Log the change
@@ -469,16 +537,40 @@ export default function App() {
         type: 'restore'
       }, ...prev].slice(0, 200));
     }
-    const next = { ...overrides };
-    if (name === null) delete next[date];
-    else next[date] = name;
-    setOverrides(next);
+    setOverrides(prev => {
+      const next = { ...prev };
+      if (name === null) delete next[date];
+      else next[date] = name;
+      return next;
+    });
     setEditingDay(null);
+  };
+
+  // Remove a consultant AND clean up any orphan data so the schedule
+  // doesn't end up referencing a name that no longer exists.
+  const removeConsultant = (name) => {
+    setConsultants(prev => prev.filter(c => c !== name));
+
+    // Strip overrides that point to this consultant.
+    setOverrides(prev => {
+      const next = {};
+      for (const [date, value] of Object.entries(prev)) {
+        if (Array.isArray(value)) {
+          const filtered = value.filter(n => n !== name);
+          if (filtered.length > 0) next[date] = filtered;
+        } else if (value !== name) {
+          next[date] = value;
+        }
+      }
+      return next;
+    });
+
+    // Drop vacation entries for this consultant.
+    setVacations(prev => prev.filter(v => v.consultant !== name));
   };
 
   // Toggle a consultant for Saturday multi-select
   const toggleSaturdayConsultant = (date, name, currentList) => {
-    const next = { ...overrides };
     let list = [...currentList];
     if (list.includes(name)) {
       list = list.filter(n => n !== name);
@@ -493,12 +585,15 @@ export default function App() {
       changedAt: new Date().toISOString(),
       type: 'saturday'
     }, ...prev].slice(0, 200));
-    if (list.length === 0) {
-      delete next[date];
-    } else {
-      next[date] = list;
-    }
-    setOverrides(next);
+    setOverrides(prev => {
+      const next = { ...prev };
+      if (list.length === 0) {
+        delete next[date];
+      } else {
+        next[date] = list;
+      }
+      return next;
+    });
     // Update editingDay to reflect the new list immediately
     setEditingDay(prev => prev ? {
       ...prev,
@@ -516,17 +611,21 @@ export default function App() {
   const addVacation = (e) => {
     e.preventDefault();
     if (vacConsultant && vacStartDate && vacEndDate) {
+      if (!consultants.includes(vacConsultant)) {
+        alert('Consultora inválida.');
+        return;
+      }
       if (vacEndDate < vacStartDate) {
         alert('A data fim não pode ser anterior à data início.');
         return;
       }
-      setVacations([...vacations, {
+      setVacations(prev => [...prev, {
         id: Date.now(),
         consultant: vacConsultant,
         startDate: vacStartDate,
         endDate: vacEndDate,
         type: vacType,
-        description: vacDescription
+        description: vacDescription.trim()
       }]);
       setVacConsultant('');
       setVacStartDate('');
@@ -536,7 +635,7 @@ export default function App() {
     }
   };
 
-  const removeVacation = (id) => setVacations(vacations.filter(v => v.id !== id));
+  const removeVacation = (id) => setVacations(prev => prev.filter(v => v.id !== id));
 
   // ── Backup / Restauração ─────────────────────────────
   const exportBackup = () => {
@@ -566,22 +665,26 @@ export default function App() {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = async (ev) => {
         try {
-          const data = JSON.parse(ev.target.result);
-          if (data.version !== 'jl_backup_v1') {
+          const parsed = JSON.parse(ev.target.result);
+          if (parsed.version !== 'jl_backup_v1') {
             alert('Arquivo de backup inválido.');
             return;
           }
-          if (!window.confirm('Restaurar backup? Isso substituirá todos os dados atuais.')) return;
-          if (data.consultants) setConsultants(data.consultants);
-          if (data.holidays) setHolidays(data.holidays);
-          if (data.overrides) setOverrides(data.overrides);
-          if (data.vacations) setVacations(data.vacations);
-          if (data.auditLog) setAuditLog(data.auditLog);
+          if (!window.confirm('Restaurar backup? Isso substituirá todos os dados atuais (em todos os dispositivos).')) return;
+          await replaceAll({
+            consultants: parsed.consultants || [],
+            holidays:    parsed.holidays    || [],
+            overrides:   parsed.overrides   || {},
+            vacations:   parsed.vacations   || [],
+            auditLog:    parsed.auditLog    || [],
+          });
           alert('Backup restaurado com sucesso!');
-        } catch {
-          alert('Erro ao ler arquivo. Verifique se é um backup válido.');
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error(err);
+          alert('Erro ao ler arquivo ou enviar para o servidor. Verifique sua conexão e tente novamente.');
         }
       };
       reader.readAsText(file);
@@ -662,11 +765,15 @@ export default function App() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && e.target.value.trim()) {
                     const nome = e.target.value.trim();
+                    if (nome.length > 40) {
+                      alert('Nome muito longo (máx. 40 caracteres).');
+                      return;
+                    }
                     if (consultants.some(c => c.toLowerCase() === nome.toLowerCase())) {
                       alert('Essa consultora já está cadastrada.');
                       return;
                     }
-                    setConsultants([...consultants, nome]);
+                    setConsultants(prev => [...prev, nome]);
                     e.target.value = '';
                   }
                 }}
@@ -683,8 +790,8 @@ export default function App() {
                   </div>
                   <button
                     onClick={() => {
-                      if (window.confirm(`Remover "${name}" da escala?`)) {
-                        setConsultants(consultants.filter((_, idx) => idx !== i));
+                      if (window.confirm(`Remover "${name}" da escala? Trocas manuais e férias dela também serão apagadas.`)) {
+                        removeConsultant(name);
                       }
                     }}
                     className="p-1 text-slate-600 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100 transition-all touch-manipulation"

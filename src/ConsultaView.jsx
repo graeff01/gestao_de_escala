@@ -1,25 +1,18 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { format, addMonths, subMonths, differenceInMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  ChevronLeft, ChevronRight, CalendarCheck2, ShieldCheck, Eye
+  ChevronLeft, ChevronRight, CalendarCheck2, ShieldCheck, Eye, Loader2, CloudOff
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { generateSchedule, capitalize } from './utils/scheduler';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useCloudData } from './hooks/useCloudData';
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
-
-const CONSULTANT_COLORS = [
-  { dot: 'bg-emerald-500',  badge: 'bg-emerald-100 text-emerald-800' },
-  { dot: 'bg-sky-500',      badge: 'bg-sky-100 text-sky-800'         },
-  { dot: 'bg-violet-500',   badge: 'bg-violet-100 text-violet-800'   },
-  { dot: 'bg-amber-500',    badge: 'bg-amber-100 text-amber-800'     },
-  { dot: 'bg-rose-500',     badge: 'bg-rose-100 text-rose-800'       },
-];
 
 const fadeUp = {
   hidden:  { opacity: 0, y: 16 },
@@ -36,59 +29,15 @@ const rowVariant = {
   visible: { opacity: 1, x: 0, transition: { duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] } },
 };
 
-// Helper to read all schedule data from localStorage
-function readStorageData() {
-  return {
-    consultants: JSON.parse(localStorage.getItem('jl_consultants_v6') || '["Roberta","Elis","Duda"]'),
-    holidays:    JSON.parse(localStorage.getItem('jl_holidays_v6')    || '[]'),
-    overrides:   JSON.parse(localStorage.getItem('jl_overrides_v6')   || '{}'),
-    vacations:   JSON.parse(localStorage.getItem('jl_vacations_v6')   || '[]'),
-  };
-}
-
 export default function ConsultaView() {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const [data, setData] = useState(readStorageData);
-  const [dataVersion, setDataVersion] = useState(0);
 
-  // Re-read localStorage data
-  const refreshData = useCallback(() => {
-    setData(readStorageData());
-    setDataVersion(v => v + 1);
-  }, []);
-
-  useEffect(() => {
-    // When another tab/window changes localStorage (admin panel)
-    const onStorage = (e) => {
-      if (e.key && e.key.startsWith('jl_')) {
-        refreshData();
-      }
-    };
-
-    // When PWA comes back to foreground, re-read data
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshData();
-      }
-    };
-
-    // When PWA regains focus
-    const onFocus = () => refreshData();
-
-    window.addEventListener('storage', onStorage);
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [refreshData]);
-
+  // Subscribe in read-only mode. Real-time updates from Firestore will
+  // automatically re-render this view whenever the gestora saves anything.
+  const { data, status, error } = useCloudData({ readOnly: true });
   const { consultants, holidays, overrides, vacations } = data;
 
   const schedule = useMemo(() => {
@@ -112,8 +61,7 @@ export default function ConsultaView() {
     }
 
     return generateSchedule(currentMonth, consultants, holidays, overrides, weekdayOffset, saturdayOffset, vacations);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMonth, dataVersion]);
+  }, [currentMonth, consultants, holidays, overrides, vacations]);
 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
@@ -143,9 +91,19 @@ export default function ConsultaView() {
           </div>
 
           <div className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em]">
-            <Eye className="w-3.5 h-3.5" />
-            Modo Visualização
+            {status === 'loading' ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</>
+            ) : status === 'error' ? (
+              <><CloudOff className="w-3.5 h-3.5" /> Sem conexão</>
+            ) : (
+              <><Eye className="w-3.5 h-3.5" /> Modo Visualização</>
+            )}
           </div>
+          {status === 'error' && error && (
+            <p className="text-[10px] text-red-500 font-bold uppercase tracking-wider">
+              Mostrando dados em cache. Verifique sua internet.
+            </p>
+          )}
         </motion.header>
 
         {/* Schedule Card */}

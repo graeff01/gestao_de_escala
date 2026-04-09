@@ -35,6 +35,8 @@ export function generateSchedule(monthDate, consultants, holidays, overrides = {
     const end = endOfMonth(monthDate);
     const schedule = [];
 
+    const hasConsultants = Array.isArray(consultants) && consultants.length > 0;
+
     // Trackers for rotations
     let weekdayIndex = initialWeekdayIndex;
     let saturdayIndex = initialSaturdayIndex;
@@ -48,62 +50,83 @@ export function generateSchedule(monthDate, consultants, holidays, overrides = {
 
         let consultant = '';
         let saturdayConsultants = null; // array for Saturdays with multiple consultants
+        let appliedOverride = false;    // tracks whether the override was actually used
 
-        // 1. Check for manual override first
-        if (overrides[dateStr]) {
-            const ov = overrides[dateStr];
+        // 1. Try to apply manual override (only if it points to valid, available consultant(s))
+        const ov = overrides[dateStr];
+        if (ov !== undefined && ov !== null) {
             if (isSat && Array.isArray(ov)) {
-                saturdayConsultants = ov;
-                consultant = ov.join(' + ');
-            } else {
-                consultant = ov;
+                // Saturday multi-select: keep only consultants that still exist AND are not on vacation
+                const available = ov.filter(name =>
+                    hasConsultants &&
+                    consultants.includes(name) &&
+                    !isOnVacation(name, dateStr, vacations)
+                );
+                if (available.length > 0) {
+                    saturdayConsultants = available;
+                    consultant = available.join(' + ');
+                    appliedOverride = true;
+                }
+            } else if (typeof ov === 'string' && ov.length > 0) {
+                if (
+                    hasConsultants &&
+                    consultants.includes(ov) &&
+                    !isOnVacation(ov, dateStr, vacations)
+                ) {
+                    consultant = ov;
+                    appliedOverride = true;
+                }
             }
-            // Even if overridden, we might want to advance the counter
-            // if it WAS a rotation day, but usually for swaps we just replace.
-            // Let's advance counter ONLY if it's NOT a Sunday or Holiday
-            if (!isSun && !holiday) {
+
+            if (appliedOverride && !isSun && !holiday) {
                 if (isSat) saturdayIndex++;
                 else weekdayIndex++;
             }
         }
-        // 2. Standard Logic
-        else if (isSun) {
-            consultant = '#';
-        } else if (holiday) {
-            consultant = holiday.name || 'Feriado';
-        } else if (isSat) {
-            // Find next available consultant (skip those on vacation)
-            let attempts = 0;
-            while (attempts < consultants.length) {
-                const candidate = consultants[saturdayIndex % consultants.length];
-                if (!isOnVacation(candidate, dateStr, vacations)) {
-                    consultant = candidate;
-                    break;
+
+        // 2. Standard logic (when no valid override)
+        if (!appliedOverride) {
+            if (isSun) {
+                consultant = '#';
+            } else if (holiday) {
+                consultant = holiday.name || 'Feriado';
+            } else if (!hasConsultants) {
+                consultant = '⚠ Sem consultoras';
+                if (isSat) saturdayConsultants = [consultant];
+            } else if (isSat) {
+                // Find next available consultant (skip those on vacation)
+                let attempts = 0;
+                while (attempts < consultants.length) {
+                    const candidate = consultants[saturdayIndex % consultants.length];
+                    if (!isOnVacation(candidate, dateStr, vacations)) {
+                        consultant = candidate;
+                        break;
+                    }
+                    saturdayIndex++;
+                    attempts++;
                 }
+                if (attempts >= consultants.length) {
+                    consultant = '⚠ Todas ausentes';
+                }
+                saturdayConsultants = [consultant];
                 saturdayIndex++;
-                attempts++;
-            }
-            if (attempts >= consultants.length) {
-                consultant = '⚠ Todas ausentes';
-            }
-            saturdayConsultants = [consultant];
-            saturdayIndex++;
-        } else {
-            // Find next available consultant (skip those on vacation)
-            let attempts = 0;
-            while (attempts < consultants.length) {
-                const candidate = consultants[weekdayIndex % consultants.length];
-                if (!isOnVacation(candidate, dateStr, vacations)) {
-                    consultant = candidate;
-                    break;
+            } else {
+                // Find next available consultant (skip those on vacation)
+                let attempts = 0;
+                while (attempts < consultants.length) {
+                    const candidate = consultants[weekdayIndex % consultants.length];
+                    if (!isOnVacation(candidate, dateStr, vacations)) {
+                        consultant = candidate;
+                        break;
+                    }
+                    weekdayIndex++;
+                    attempts++;
+                }
+                if (attempts >= consultants.length) {
+                    consultant = '⚠ Todas ausentes';
                 }
                 weekdayIndex++;
-                attempts++;
             }
-            if (attempts >= consultants.length) {
-                consultant = '⚠ Todas ausentes';
-            }
-            weekdayIndex++;
         }
 
         schedule.push({
@@ -114,8 +137,8 @@ export function generateSchedule(monthDate, consultants, holidays, overrides = {
             saturdayConsultants,
             isWeekend: isSat || isSun,
             isHoliday: !!holiday,
-            isOverridden: !!overrides[dateStr],
-            hasVacation: consultants.some(c => isOnVacation(c, dateStr, vacations))
+            isOverridden: appliedOverride,
+            hasVacation: hasConsultants && consultants.some(c => isOnVacation(c, dateStr, vacations))
         });
 
         current = addDays(current, 1);
