@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { format, addMonths, subMonths, differenceInMonths, isWithinInterval, startOfMonth, endOfMonth, eachDayOfInterval, isSunday, isSaturday } from 'date-fns';
+import { format, addMonths, subMonths, differenceInMonths, isWithinInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Users, Plus, Trash2, ChevronLeft, ChevronRight,
@@ -553,44 +553,32 @@ export default function App() {
   // Alerta: mês exibido não tem nenhum feriado e é diferente do mês atual
   // (não alertamos no mês corrente pois os feriados podem ter passado)
   const noHolidayWarning = useMemo(() => {
-    const monthStr = format(currentMonth, 'yyyy-MM');
-    const hasAny   = holidays.some(h => h.date.startsWith(monthStr));
-    const isFuture = currentMonth > todayMonth;
-    return isFuture && !hasAny;
-  }, [currentMonth, holidays, todayMonth]);
+  const monthStr = format(currentMonth, "yyyy-MM");
+  const hasAny = holidays.some(h => h.date.startsWith(monthStr));
+  const isFuture = currentMonth.getTime() > todayMonth.getTime();
+
+  return isFuture && !hasAny;
+}, [currentMonth, holidays, todayMonth]);
 
   // Próximos plantões: para cada consultora, os próximos 3 dias a partir de hoje
   const nextShifts = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
     const result = {};
     consultants.forEach(name => { result[name] = []; });
-
-    // Scan schedule from current month forward up to 60 days
-    const allDays = [];
-    [currentMonth, addMonths(currentMonth, 1)].forEach(m => {
-      const s = startOfMonth(m);
-      const e = endOfMonth(m);
-      eachDayOfInterval({ start: s, end: e }).forEach(d => {
-        allDays.push(format(d, 'yyyy-MM-dd'));
-      });
-    });
-
-    for (const dateStr of allDays) {
-      if (dateStr < today) continue;
-      const row = schedule.find(r => r.date === dateStr);
-      if (!row || row.consultant === '#' || row.isHoliday) continue;
+    for (const row of schedule) {
+      if (row.date < today) continue;
+      if (row.consultant === '#' || row.isHoliday) continue;
       const names = row.saturdayConsultants && row.saturdayConsultants.length > 1
         ? row.saturdayConsultants
         : [row.consultant];
       names.forEach(name => {
-        if (result[name] && result[name].length < 3) {
+        if (result[name] !== undefined && result[name].length < 3) {
           result[name].push(row);
         }
       });
-      if (Object.values(result).every(arr => arr.length >= 3)) break;
     }
     return result;
-  }, [schedule, consultants, currentMonth]);
+  }, [schedule, consultants]);
 
   // ── Auth guard (after all hooks) ─────────────────────
   const handleLogout = async () => {
@@ -616,11 +604,16 @@ export default function App() {
 
   // ── Handlers ───────────────────────────────────────────
   // Navigation limits: ±12 months from today
-  const todayMonth   = useMemo(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); }, []);
-  const minMonth     = subMonths(todayMonth, 12);
-  const maxMonth     = addMonths(todayMonth, 12);
-  const canGoPrev    = currentMonth > minMonth;
-  const canGoNext    = currentMonth < maxMonth;
+  // Navigation limits: ±12 months from today
+const todayMonth = useMemo(() => {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), 1);
+}, []);
+
+const minMonth = subMonths(todayMonth, 12);
+const maxMonth = addMonths(todayMonth, 12);
+const canGoPrev = currentMonth.getTime() > minMonth.getTime();
+const canGoNext = currentMonth.getTime() < maxMonth.getTime();
 
   const prevMonth = () => { if (canGoPrev) setCurrentMonth(subMonths(currentMonth, 1)); };
   const nextMonth = () => { if (canGoNext) setCurrentMonth(addMonths(currentMonth, 1)); };
