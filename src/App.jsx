@@ -1018,6 +1018,7 @@ export default function App() {
                 </thead>
 
                 <motion.tbody
+                  key={format(currentMonth, 'yyyy-MM')}
                   variants={staggerList} initial="hidden" animate="visible"
                   className="divide-y divide-slate-50"
                 >
@@ -1102,6 +1103,7 @@ export default function App() {
 
             {/* Mobile Cards */}
             <motion.div
+              key={format(currentMonth, 'yyyy-MM') + '-mobile'}
               variants={staggerList} initial="hidden" animate="visible"
               className="md:hidden p-4 space-y-2 print:hidden"
             >
