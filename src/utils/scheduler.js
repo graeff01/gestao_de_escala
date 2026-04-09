@@ -129,6 +129,10 @@ export function generateSchedule(monthDate, consultants, holidays, overrides = {
             }
         }
 
+        const vacationConsultants = hasConsultants
+            ? consultants.filter(c => isOnVacation(c, dateStr, vacations))
+            : [];
+
         schedule.push({
             date: dateStr,
             formattedDate: format(current, 'dd/MM/yyyy'),
@@ -138,7 +142,8 @@ export function generateSchedule(monthDate, consultants, holidays, overrides = {
             isWeekend: isSat || isSun,
             isHoliday: !!holiday,
             isOverridden: appliedOverride,
-            hasVacation: hasConsultants && consultants.some(c => isOnVacation(c, dateStr, vacations))
+            hasVacation: vacationConsultants.length > 0,
+            vacationConsultants,
         });
 
         current = addDays(current, 1);

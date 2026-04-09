@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { format, addMonths, subMonths, differenceInMonths } from 'date-fns';
+import { format, addMonths, subMonths, differenceInMonths, isWithinInterval, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Users, Plus, Trash2, ChevronLeft, ChevronRight,
@@ -25,6 +25,18 @@ import { useCloudData } from './hooks/useCloudData';
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
+}
+
+// Returns the active vacation for a consultant on a given date string (or today)
+function getActiveVacation(name, vacations, dateStr) {
+  const d = new Date((dateStr || format(new Date(), 'yyyy-MM-dd')) + 'T12:00:00');
+  return vacations.find(v =>
+    v.consultant === name &&
+    isWithinInterval(d, {
+      start: new Date(v.startDate + 'T12:00:00'),
+      end:   new Date(v.endDate   + 'T12:00:00'),
+    })
+  ) || null;
 }
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
@@ -105,114 +117,166 @@ function NavBtn({ onClick, children, light = false }) {
 // ─── Stat Card (sidebar) ──────────────────────────────────────────────────────
 
 function StatCard({ item, index, maxDays }) {
-  const color = CONSULTANT_COLORS[index % CONSULTANT_COLORS.length];
-  const pct   = maxDays > 0 ? Math.round((item.total / maxDays) * 100) : 0;
+  const color      = CONSULTANT_COLORS[index % CONSULTANT_COLORS.length];
+  const pct        = maxDays > 0 ? Math.round((item.total / maxDays) * 100) : 0;
+  const onVacation = item.activeVacation;
 
   return (
     <motion.div
       variants={fadeUp}
-      className="bg-white/[0.06] rounded-2xl p-3.5 border border-white/[0.07] hover:bg-white/10 transition-colors"
+      className={cn(
+        'rounded-2xl p-3.5 border transition-colors',
+        onVacation
+          ? 'bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/15'
+          : 'bg-white/[0.06] border-white/[0.07] hover:bg-white/10'
+      )}
     >
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
-          <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', color.dot)} />
-          <span className="text-xs font-semibold text-slate-100 tracking-tight">{item.name}</span>
+          <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', onVacation ? 'bg-amber-400' : color.dot)} />
+          <span className={cn('text-xs font-semibold tracking-tight', onVacation ? 'text-amber-200' : 'text-slate-100')}>
+            {item.name}
+          </span>
         </div>
-        <span className="text-xs font-black text-emerald-400 tabular-nums">{item.total}d</span>
+        {onVacation ? (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/30">
+            <Palmtree className="w-2.5 h-2.5 text-amber-400" />
+            <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider">
+              {onVacation.type === 'ferias' ? 'Férias' : 'Folga'}
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs font-black text-emerald-400 tabular-nums">{item.total}d</span>
+        )}
       </div>
 
-      <div className="h-[3px] bg-white/10 rounded-full overflow-hidden mb-3">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.9, delay: 0.4 + index * 0.12, ease: 'easeOut' }}
-          className={cn('h-full rounded-full', color.bar)}
-        />
-      </div>
+      {onVacation ? (
+        <div className="text-[10px] text-amber-400/70 font-bold space-y-0.5">
+          <p>De {format(new Date(onVacation.startDate + 'T12:00:00'), 'dd/MM')} até {format(new Date(onVacation.endDate + 'T12:00:00'), 'dd/MM')}</p>
+          <p className="text-amber-500">↩ Retorna em {format(new Date(onVacation.endDate + 'T12:00:00'), 'dd/MM/yyyy')}</p>
+        </div>
+      ) : (
+        <>
+          <div className="h-[3px] bg-white/10 rounded-full overflow-hidden mb-3">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.9, delay: 0.4 + index * 0.12, ease: 'easeOut' }}
+              className={cn('h-full rounded-full', color.bar)}
+            />
+          </div>
 
-      <div className="grid grid-cols-2 gap-1.5 text-center">
-        <div>
-          <p className="text-[8px] text-slate-500 uppercase font-bold tracking-widest mb-0.5">Úteis</p>
-          <p className="text-xs font-bold text-slate-400 tabular-nums">{item.weekdays}</p>
-        </div>
-        <div className="bg-emerald-500/10 rounded-xl py-1">
-          <p className="text-[8px] text-emerald-600 uppercase font-black tracking-widest mb-0.5">Sábados</p>
-          <p className="text-xs font-black text-emerald-400 tabular-nums">{item.saturdays}</p>
-        </div>
-      </div>
+          <div className="grid grid-cols-2 gap-1.5 text-center">
+            <div>
+              <p className="text-[8px] text-slate-500 uppercase font-bold tracking-widest mb-0.5">Úteis</p>
+              <p className="text-xs font-bold text-slate-400 tabular-nums">{item.weekdays}</p>
+            </div>
+            <div className="bg-emerald-500/10 rounded-xl py-1">
+              <p className="text-[8px] text-emerald-600 uppercase font-black tracking-widest mb-0.5">Sábados</p>
+              <p className="text-xs font-black text-emerald-400 tabular-nums">{item.saturdays}</p>
+            </div>
+          </div>
+        </>
+      )}
     </motion.div>
   );
 }
 
 // ─── Mobile Schedule Card ─────────────────────────────────────────────────────
 
-function MobileCard({ row, colorIndex, onEdit, consultants: allConsultants }) {
-  const isSat     = row.dayOfWeek === 'sábado';
-  const isSun     = row.dayOfWeek === 'domingo';
-  const isHoliday = row.isHoliday;
-  const isOff     = row.consultant === '#';
+function MobileCard({ row, onEdit, consultants: allConsultants }) {
+  const isSat      = row.dayOfWeek === 'sábado';
+  const isSun      = row.dayOfWeek === 'domingo';
+  const isHoliday  = row.isHoliday;
+  const isOff      = row.consultant === '#';
   const hasMultiple = isSat && row.saturdayConsultants && row.saturdayConsultants.length > 1;
+  const isToday    = row.date === format(new Date(), 'yyyy-MM-dd');
+  const consultantIdx = allConsultants ? allConsultants.indexOf(row.consultant) : -1;
+  const consultantColor = consultantIdx >= 0 ? CONSULTANT_COLORS[consultantIdx % CONSULTANT_COLORS.length] : null;
+  const vacCons    = row.vacationConsultants || [];
 
   return (
     <motion.div
       variants={rowVariant}
       className={cn(
-        'relative rounded-2xl border p-4 flex items-center justify-between gap-3 transition-colors',
-        isSat     ? 'bg-emerald-500/[0.06] border-emerald-200'  :
-        isSun || isHoliday ? 'bg-slate-50 border-slate-100' :
+        'relative rounded-2xl border p-4 flex flex-col gap-2 transition-colors',
+        isToday    ? 'bg-sky-50 border-sky-300 ring-1 ring-sky-200'  :
+        isSat      ? 'bg-emerald-500/[0.06] border-emerald-200'      :
+        isSun || isHoliday ? 'bg-slate-50 border-slate-100'         :
+        row.hasVacation ? 'bg-amber-50/60 border-amber-200'          :
                     'bg-white border-slate-100'
       )}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        {isSat && <div className="w-[3px] self-stretch bg-emerald-500 rounded-full shrink-0" />}
-        <div className="min-w-0">
-          <p className="text-xs font-bold text-slate-500 tabular-nums">{row.formattedDate}</p>
-          <p className={cn(
-            'text-[10px] font-black uppercase tracking-wider mt-0.5',
-            isSat ? 'text-emerald-600' : 'text-slate-400'
-          )}>
-            {capitalize(row.dayOfWeek)}
-            {isHoliday && (
-              <span className="ml-1.5 text-amber-500 normal-case font-semibold tracking-normal">· Feriado</span>
-            )}
-          </p>
+      {isToday && (
+        <span className="absolute top-2 right-2 text-[8px] font-black text-sky-500 uppercase tracking-widest bg-sky-100 px-2 py-0.5 rounded-full">Hoje</span>
+      )}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          {isSat && <div className="w-[3px] self-stretch bg-emerald-500 rounded-full shrink-0" />}
+          <div className="min-w-0">
+            <p className={cn('text-xs font-bold tabular-nums', isToday ? 'text-sky-600' : 'text-slate-500')}>{row.formattedDate}</p>
+            <p className={cn(
+              'text-[10px] font-black uppercase tracking-wider mt-0.5',
+              isSat ? 'text-emerald-600' : 'text-slate-400'
+            )}>
+              {capitalize(row.dayOfWeek)}
+              {isHoliday && (
+                <span className="ml-1.5 text-amber-500 normal-case font-semibold tracking-normal">· Feriado</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {hasMultiple ? (
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {row.saturdayConsultants.map((name, ci) => {
+                const cIdx = allConsultants ? allConsultants.indexOf(name) : ci;
+                const color = CONSULTANT_COLORS[(cIdx >= 0 ? cIdx : ci) % CONSULTANT_COLORS.length];
+                return (
+                  <span key={name} className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black', color.badge)}>
+                    <span className={cn('w-1 h-1 rounded-full', color.dot)} />
+                    {name}
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              {consultantColor && !isOff && !isHoliday && (
+                <span className={cn('w-2 h-2 rounded-full shrink-0', consultantColor.dot)} />
+              )}
+              <span className={cn(
+                'text-sm font-black tracking-tight',
+                row.isOverridden ? 'text-blue-600 italic' :
+                isOff || isHoliday ? 'text-slate-300 font-normal italic text-xs' :
+                'text-slate-800'
+              )}>
+                {isOff ? '—' : row.consultant}
+              </span>
+            </div>
+          )}
+
+          {!isOff && !isHoliday && (
+            <button
+              onClick={() => onEdit(row)}
+              className="no-print p-2 rounded-xl bg-slate-100 text-slate-400 hover:bg-emerald-50 hover:text-emerald-700 transition-all active:scale-90 touch-manipulation"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
-        {hasMultiple ? (
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            {row.saturdayConsultants.map((name, ci) => {
-              const cIdx = allConsultants ? allConsultants.indexOf(name) : ci;
-              const color = CONSULTANT_COLORS[(cIdx >= 0 ? cIdx : ci) % CONSULTANT_COLORS.length];
-              return (
-                <span key={name} className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black', color.badge)}>
-                  <span className={cn('w-1 h-1 rounded-full', color.dot)} />
-                  {name}
-                </span>
-              );
-            })}
-          </div>
-        ) : (
-          <span className={cn(
-            'text-sm font-black tracking-tight',
-            row.isOverridden ? 'text-blue-600 italic' :
-            isOff || isHoliday ? 'text-slate-300 font-normal italic text-xs' :
-            'text-slate-800'
-          )}>
-            {isOff ? '—' : row.consultant}
+      {/* Subtle coverage indicator on mobile */}
+      {vacCons.length > 0 && !isSun && !isHoliday && (
+        <div className="flex items-center gap-1 pl-1">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 text-[9px] font-bold">
+            <Palmtree className="w-2.5 h-2.5" />
+            cobertura ativa
           </span>
-        )}
-
-        {!isOff && !isHoliday && (
-          <button
-            onClick={() => onEdit(row)}
-            className="no-print p-2 rounded-xl bg-slate-100 text-slate-400 hover:bg-emerald-50 hover:text-emerald-700 transition-all active:scale-90 touch-manipulation"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -390,7 +454,10 @@ export default function App() {
   const setAuditLog    = cloud.setAuditLog;
 
   // ── Local UI state (not persisted) ──────────────────────
-  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 2, 1));
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [searchTerm, setSearchTerm]         = useState('');
   const [editingDay, setEditingDay]         = useState(null);
   const [showHolidayManager, setHolidayMgr] = useState(false);
@@ -471,7 +538,11 @@ export default function App() {
         if (day.dayOfWeek !== 'domingo') counts[day.consultant].weekdays++;
       }
     });
-    return Object.entries(counts).map(([name, data]) => ({ name, ...data }));
+    return Object.entries(counts).map(([name, data]) => ({
+      name,
+      ...data,
+      activeVacation: getActiveVacation(name, vacations),
+    }));
   }, [schedule, consultants]);
 
   const maxDays = Math.max(...stats.map(s => s.total), 1);
@@ -781,25 +852,46 @@ export default function App() {
               <Plus className="w-3.5 h-3.5 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
-            <div className="space-y-1.5 max-h-36 overflow-y-auto">
-              {consultants.map((name, i) => (
-                <div key={i} className="flex items-center justify-between px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.05] rounded-xl group">
-                  <div className="flex items-center gap-2.5">
-                    <div className={cn('w-1.5 h-1.5 rounded-full', CONSULTANT_COLORS[i % CONSULTANT_COLORS.length].dot)} />
-                    <span className="text-xs font-semibold text-slate-300">{name}</span>
+            <div className="space-y-1.5 max-h-44 overflow-y-auto">
+              {consultants.map((name, i) => {
+                const activeVac = getActiveVacation(name, vacations);
+                const color = CONSULTANT_COLORS[i % CONSULTANT_COLORS.length];
+                return (
+                  <div key={i} className={cn(
+                    'flex items-center justify-between px-3.5 py-2.5 border rounded-xl group transition-all',
+                    activeVac
+                      ? 'bg-amber-500/10 border-amber-500/20'
+                      : 'bg-white/[0.04] border-white/[0.05]'
+                  )}>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex items-center gap-2.5">
+                        <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', activeVac ? 'bg-amber-400' : color.dot)} />
+                        <span className={cn('text-xs font-semibold truncate', activeVac ? 'text-amber-300' : 'text-slate-300')}>
+                          {name}
+                        </span>
+                      </div>
+                      {activeVac && (
+                        <div className="flex items-center gap-1.5 pl-4">
+                          <Palmtree className="w-2.5 h-2.5 text-amber-500 shrink-0" />
+                          <span className="text-[9px] text-amber-400/80 font-bold uppercase tracking-wider">
+                            {activeVac.type === 'ferias' ? 'Férias' : 'Folga'} · volta {format(new Date(activeVac.endDate + 'T12:00:00'), 'dd/MM')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Remover "${name}" da escala? Trocas manuais e férias dela também serão apagadas.`)) {
+                          removeConsultant(name);
+                        }
+                      }}
+                      className="p-1 text-slate-600 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100 transition-all touch-manipulation shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Remover "${name}" da escala? Trocas manuais e férias dela também serão apagadas.`)) {
-                        removeConsultant(name);
-                      }
-                    }}
-                    className="p-1 text-slate-600 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100 transition-all touch-manipulation"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1022,10 +1114,15 @@ export default function App() {
                   variants={staggerList} initial="hidden" animate="visible"
                   className="divide-y divide-slate-50"
                 >
-                  {schedule.map((row) => {
+                  {(() => {
+                    const todayStr = format(new Date(), 'yyyy-MM-dd');
+                    return schedule.map((row) => {
                     const isHighlighted  = searchTerm && row.consultant.toLowerCase().includes(searchTerm.toLowerCase());
                     const isSat          = row.dayOfWeek === 'sábado';
                     const isHolidayOrSun = row.dayOfWeek === 'domingo' || row.isHoliday;
+                    const isToday        = row.date === todayStr;
+                    const consultantIdx  = consultants.indexOf(row.consultant);
+                    const consultantColor = consultantIdx >= 0 ? CONSULTANT_COLORS[consultantIdx % CONSULTANT_COLORS.length] : null;
 
                     return (
                       <motion.tr
@@ -1033,21 +1130,30 @@ export default function App() {
                         variants={rowVariant}
                         className={cn(
                           'group transition-all border-l-[3px]',
-                          isSat          ? 'bg-emerald-500/[0.05] border-l-emerald-500'   :
-                          isHolidayOrSun ? 'bg-slate-50/40 border-l-transparent'          :
+                          isToday        ? 'bg-sky-50/60 border-l-sky-500'                  :
+                          isSat          ? 'bg-emerald-500/[0.05] border-l-emerald-500'     :
+                          isHolidayOrSun ? 'bg-slate-50/40 border-l-transparent'            :
+                          row.hasVacation? 'bg-amber-50/40 border-l-amber-300 hover:bg-amber-50/70' :
                                            'bg-white border-l-transparent hover:bg-slate-50/60',
                           isHighlighted  ? 'bg-emerald-50/60 border-l-emerald-400 ring-inset ring-1 ring-emerald-200' : ''
                         )}
                       >
-                        <td className="px-8 py-5 text-center text-xs tabular-nums font-bold text-slate-400 group-hover:text-slate-700 transition-colors">
-                          {row.formattedDate}
+                        <td className="px-8 py-5 text-center text-xs tabular-nums font-bold group-hover:text-slate-700 transition-colors">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className={isToday ? 'text-sky-600 font-black' : 'text-slate-400'}>
+                              {row.formattedDate}
+                            </span>
+                            {isToday && (
+                              <span className="text-[8px] font-black text-sky-500 uppercase tracking-widest">Hoje</span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="px-8 py-5 text-center">
                           <span className={cn(
                             'text-[10px] font-black px-3.5 py-1.5 rounded-xl border whitespace-nowrap inline-block',
-                            row.dayOfWeek === 'domingo' ? 'text-slate-400 border-slate-200 bg-white'              :
-                            row.dayOfWeek === 'sábado'  ? 'text-emerald-700 border-emerald-300 bg-emerald-50'    :
+                            row.dayOfWeek === 'domingo' ? 'text-slate-400 border-slate-200 bg-white'           :
+                            row.dayOfWeek === 'sábado'  ? 'text-emerald-700 border-emerald-300 bg-emerald-50'  :
                                                           'text-slate-500 border-slate-100 bg-slate-50'
                           )}>
                             {capitalize(row.dayOfWeek)}
@@ -1055,48 +1161,65 @@ export default function App() {
                         </td>
 
                         <td className="px-8 py-5 text-center relative">
-                          <div className="flex items-center justify-center gap-3">
-                            {isSat && row.saturdayConsultants && row.saturdayConsultants.length > 1 ? (
-                              <div className="flex items-center gap-2 flex-wrap justify-center">
-                                {row.saturdayConsultants.map((name, ci) => {
-                                  const cIdx = consultants.indexOf(name);
-                                  const color = CONSULTANT_COLORS[(cIdx >= 0 ? cIdx : ci) % CONSULTANT_COLORS.length];
-                                  return (
-                                    <span key={name} className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black', color.badge)}>
-                                      <span className={cn('w-1.5 h-1.5 rounded-full', color.dot)} />
-                                      {name}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <span className={cn(
-                                'text-sm font-black tracking-tight transition-all',
-                                row.isOverridden ? 'text-blue-600 italic'         : 'text-slate-800',
-                                row.consultant === '#'  ? 'text-slate-200 font-normal italic text-xs' : '',
-                                row.isHoliday    ? 'text-slate-400 opacity-60'   : '',
-                                isHighlighted    ? 'text-emerald-800'             : ''
-                              )}>
-                                {row.consultant}
-                                {row.isHoliday && (
-                                  <Info className="inline w-3.5 h-3.5 ml-1.5 text-amber-400/60" />
-                                )}
-                              </span>
-                            )}
+                          <div className="flex flex-col items-center gap-1.5">
+                            <div className="flex items-center justify-center gap-3">
+                              {isSat && row.saturdayConsultants && row.saturdayConsultants.length > 1 ? (
+                                <div className="flex items-center gap-2 flex-wrap justify-center">
+                                  {row.saturdayConsultants.map((name, ci) => {
+                                    const cIdx = consultants.indexOf(name);
+                                    const color = CONSULTANT_COLORS[(cIdx >= 0 ? cIdx : ci) % CONSULTANT_COLORS.length];
+                                    return (
+                                      <span key={name} className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black', color.badge)}>
+                                        <span className={cn('w-1.5 h-1.5 rounded-full', color.dot)} />
+                                        {name}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  {consultantColor && row.consultant !== '#' && !row.isHoliday && (
+                                    <span className={cn('w-2 h-2 rounded-full shrink-0', consultantColor.dot)} />
+                                  )}
+                                  <span className={cn(
+                                    'text-sm font-black tracking-tight transition-all',
+                                    row.isOverridden ? 'text-blue-600 italic'         : 'text-slate-800',
+                                    row.consultant === '#'  ? 'text-slate-200 font-normal italic text-xs' : '',
+                                    row.isHoliday    ? 'text-slate-400 opacity-60'   : '',
+                                    isHighlighted    ? 'text-emerald-800'             : ''
+                                  )}>
+                                    {row.consultant}
+                                    {row.isHoliday && (
+                                      <Info className="inline w-3.5 h-3.5 ml-1.5 text-amber-400/60" />
+                                    )}
+                                  </span>
+                                </div>
+                              )}
 
-                            {row.consultant !== '#' && !row.isHoliday && (
-                              <button
-                                onClick={() => setEditingDay(row)}
-                                className="no-print p-2 rounded-xl bg-white border border-slate-200 shadow-sm text-slate-400 hover:text-emerald-700 hover:border-emerald-200 opacity-0 group-hover:opacity-100 transition-all hover:scale-105 active:scale-95"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
+                              {row.consultant !== '#' && !row.isHoliday && (
+                                <button
+                                  onClick={() => setEditingDay(row)}
+                                  className="no-print p-2 rounded-xl bg-white border border-slate-200 shadow-sm text-slate-400 hover:text-emerald-700 hover:border-emerald-200 opacity-0 group-hover:opacity-100 transition-all hover:scale-105 active:scale-95"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Vacation indicator — subtle dot on rows where rotation was affected */}
+                            {row.hasVacation && !isHolidayOrSun && (
+                              <div className="flex items-center gap-1 flex-wrap justify-center">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 text-[9px] font-bold border border-amber-200">
+                                  <Palmtree className="w-2.5 h-2.5" />
+                                  cobertura ativa
+                                </span>
+                              </div>
                             )}
                           </div>
                         </td>
                       </motion.tr>
                     );
-                  })}
+                  });})()}
                 </motion.tbody>
               </table>
             </div>
@@ -1111,7 +1234,7 @@ export default function App() {
                 <MobileCard
                   key={row.date}
                   row={row}
-                  colorIndex={getColorIndex(row.consultant)}
+
                   onEdit={setEditingDay}
                   consultants={consultants}
                 />
