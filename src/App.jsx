@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { format, addMonths, subMonths, differenceInMonths, isWithinInterval, parseISO } from 'date-fns';
+import { format, addMonths, subMonths, differenceInMonths, isWithinInterval, startOfMonth, endOfMonth, eachDayOfInterval, isSunday, isSaturday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Users, Plus, Trash2, ChevronLeft, ChevronRight,
   Edit3, X, Check, BarChart3, CalendarCheck2,
   ShieldCheck, Search, CalendarClock, History,
-  Info, Menu, Eye, Lock, LogOut,
+  Info, Menu, Eye, EyeOff, Lock, LogOut,
   ClipboardList, Palmtree, ArrowRight, CalendarOff,
-  Download, Upload, Loader2, CloudOff
+  Download, Upload, Loader2, CloudOff, AlertTriangle, CalendarDays
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -100,13 +100,15 @@ function SectionLabel({ icon, label, accent = false }) {
   );
 }
 
-function NavBtn({ onClick, children, light = false }) {
+function NavBtn({ onClick, children, light = false, disabled = false }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        'p-2 rounded-xl transition-all active:scale-90 touch-manipulation',
-        light ? 'hover:bg-slate-100' : 'hover:bg-white/10'
+        'p-2 rounded-xl transition-all touch-manipulation',
+        disabled ? 'opacity-30 cursor-not-allowed' : 'active:scale-90',
+        light ? 'hover:bg-slate-100' : (!disabled && 'hover:bg-white/10')
       )}
     >
       {children}
@@ -282,11 +284,12 @@ function MobileCard({ row, onEdit, consultants: allConsultants }) {
 const AUTH_USER = 'Ana';
 
 function LoginScreen() {
-  const [name, setName]       = useState('');
+  const [name, setName]         = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError]     = useState('');
-  const [shake, setShake]     = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const [error, setError]       = useState('');
+  const [shake, setShake]       = useState(false);
+  const [loading, setLoading]   = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -357,13 +360,22 @@ function LoginScreen() {
 
           <div className="space-y-1.5">
             <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Senha</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError(''); }}
-              placeholder="Sua senha..."
-              className="w-full px-5 py-4 rounded-2xl bg-white/[0.06] border border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-sm text-white placeholder:text-slate-600 font-semibold transition-all"
-            />
+            <div className="relative">
+              <input
+                type={showPass ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                placeholder="Sua senha..."
+                className="w-full px-5 py-4 pr-12 rounded-2xl bg-white/[0.06] border border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-sm text-white placeholder:text-slate-600 font-semibold transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass(v => !v)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors touch-manipulation"
+              >
+                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <AnimatePresence>
@@ -538,6 +550,48 @@ export default function App() {
 
   const maxDays = Math.max(...stats.map(s => s.total), 1);
 
+  // Alerta: mês exibido não tem nenhum feriado e é diferente do mês atual
+  // (não alertamos no mês corrente pois os feriados podem ter passado)
+  const noHolidayWarning = useMemo(() => {
+    const monthStr = format(currentMonth, 'yyyy-MM');
+    const hasAny   = holidays.some(h => h.date.startsWith(monthStr));
+    const isFuture = currentMonth > todayMonth;
+    return isFuture && !hasAny;
+  }, [currentMonth, holidays, todayMonth]);
+
+  // Próximos plantões: para cada consultora, os próximos 3 dias a partir de hoje
+  const nextShifts = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const result = {};
+    consultants.forEach(name => { result[name] = []; });
+
+    // Scan schedule from current month forward up to 60 days
+    const allDays = [];
+    [currentMonth, addMonths(currentMonth, 1)].forEach(m => {
+      const s = startOfMonth(m);
+      const e = endOfMonth(m);
+      eachDayOfInterval({ start: s, end: e }).forEach(d => {
+        allDays.push(format(d, 'yyyy-MM-dd'));
+      });
+    });
+
+    for (const dateStr of allDays) {
+      if (dateStr < today) continue;
+      const row = schedule.find(r => r.date === dateStr);
+      if (!row || row.consultant === '#' || row.isHoliday) continue;
+      const names = row.saturdayConsultants && row.saturdayConsultants.length > 1
+        ? row.saturdayConsultants
+        : [row.consultant];
+      names.forEach(name => {
+        if (result[name] && result[name].length < 3) {
+          result[name].push(row);
+        }
+      });
+      if (Object.values(result).every(arr => arr.length >= 3)) break;
+    }
+    return result;
+  }, [schedule, consultants, currentMonth]);
+
   // ── Auth guard (after all hooks) ─────────────────────
   const handleLogout = async () => {
     try {
@@ -561,8 +615,15 @@ export default function App() {
   }
 
   // ── Handlers ───────────────────────────────────────────
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
-  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
+  // Navigation limits: ±12 months from today
+  const todayMonth   = useMemo(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); }, []);
+  const minMonth     = subMonths(todayMonth, 12);
+  const maxMonth     = addMonths(todayMonth, 12);
+  const canGoPrev    = currentMonth > minMonth;
+  const canGoNext    = currentMonth < maxMonth;
+
+  const prevMonth = () => { if (canGoPrev) setCurrentMonth(subMonths(currentMonth, 1)); };
+  const nextMonth = () => { if (canGoNext) setCurrentMonth(addMonths(currentMonth, 1)); };
 
   const addHoliday = (e) => {
     e.preventDefault();
@@ -792,14 +853,14 @@ export default function App() {
           <SectionLabel icon={<CalendarClock className="w-3 h-3" />} label="Navegação" />
           <div className="bg-white/[0.05] p-3.5 rounded-2xl border border-white/[0.06]">
             <div className="flex items-center justify-between">
-              <NavBtn onClick={prevMonth}>
-                <ChevronLeft className="w-4 h-4 text-emerald-400" />
+              <NavBtn onClick={prevMonth} disabled={!canGoPrev}>
+                <ChevronLeft className={cn('w-4 h-4', canGoPrev ? 'text-emerald-400' : 'text-slate-600')} />
               </NavBtn>
               <span className="font-black text-slate-100 text-sm tracking-tight">
                 {capitalize(format(currentMonth, 'MMMM yyyy', { locale: ptBR }))}
               </span>
-              <NavBtn onClick={nextMonth}>
-                <ChevronRight className="w-4 h-4 text-emerald-400" />
+              <NavBtn onClick={nextMonth} disabled={!canGoNext}>
+                <ChevronRight className={cn('w-4 h-4', canGoNext ? 'text-emerald-400' : 'text-slate-600')} />
               </NavBtn>
             </div>
           </div>
@@ -813,6 +874,50 @@ export default function App() {
               <StatCard key={item.name} item={item} index={idx} maxDays={maxDays} />
             ))}
           </motion.div>
+        </div>
+
+        {/* Próximos Plantões */}
+        <div className="space-y-3">
+          <SectionLabel icon={<CalendarDays className="w-3 h-3" />} label="Próximos Plantões" />
+          <div className="space-y-2">
+            {consultants.map((name, i) => {
+              const color  = CONSULTANT_COLORS[i % CONSULTANT_COLORS.length];
+              const shifts = nextShifts[name] || [];
+              const onVac  = getActiveVacation(name, vacations);
+              return (
+                <div key={name} className="bg-white/[0.04] border border-white/[0.05] rounded-2xl p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', onVac ? 'bg-amber-400' : color.dot)} />
+                    <span className={cn('text-[11px] font-black tracking-tight', onVac ? 'text-amber-300' : 'text-slate-200')}>
+                      {name}
+                    </span>
+                    {onVac && (
+                      <span className="ml-auto text-[8px] font-black text-amber-500 uppercase tracking-wider">Ausente</span>
+                    )}
+                  </div>
+                  {shifts.length === 0 ? (
+                    <p className="text-[10px] text-slate-600 font-semibold pl-3.5">Sem plantões no período</p>
+                  ) : (
+                    <div className="space-y-1 pl-3.5">
+                      {shifts.map(row => (
+                        <div key={row.date} className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 font-bold tabular-nums">{row.formattedDate}</span>
+                          <span className={cn(
+                            'text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg',
+                            row.dayOfWeek === 'sábado'
+                              ? 'bg-emerald-500/10 text-emerald-400'
+                              : 'bg-white/[0.04] text-slate-500'
+                          )}>
+                            {capitalize(row.dayOfWeek.split('-')[0])}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Consultants */}
@@ -1066,10 +1171,10 @@ export default function App() {
               <div className="flex items-center gap-2">
                 {/* Mobile month nav */}
                 <div className="xl:hidden flex items-center gap-1">
-                  <NavBtn onClick={prevMonth} light>
+                  <NavBtn onClick={prevMonth} light disabled={!canGoPrev}>
                     <ChevronLeft className="w-4 h-4 text-slate-500" />
                   </NavBtn>
-                  <NavBtn onClick={nextMonth} light>
+                  <NavBtn onClick={nextMonth} light disabled={!canGoNext}>
                     <ChevronRight className="w-4 h-4 text-slate-500" />
                   </NavBtn>
                 </div>
@@ -1082,6 +1187,22 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Holiday warning banner */}
+            {noHolidayWarning && (
+              <div className="mx-6 mt-4 mb-1 md:mx-10 flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 no-print">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                <p className="text-xs font-bold text-amber-700">
+                  Nenhum feriado cadastrado para {capitalize(format(currentMonth, 'MMMM yyyy', { locale: ptBR }))}. Verifique se há feriados nacionais ou locais a incluir.
+                </p>
+                <button
+                  onClick={() => setHolidayMgr(true)}
+                  className="ml-auto shrink-0 text-[10px] font-black uppercase tracking-wider text-amber-700 hover:text-amber-900 underline underline-offset-2 transition-colors"
+                >
+                  Adicionar
+                </button>
+              </div>
+            )}
 
             {/* Desktop Table */}
             <div className="hidden md:block overflow-x-auto print:block">
